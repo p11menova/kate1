@@ -1,0 +1,125 @@
+import pygame as pg
+import csv
+
+
+import random
+import os
+
+DATA_DIR = 'data'
+GRAVITY = 0.1
+screen_rect = (0, 0, 500, 200)
+
+all_sprites = pg.sprite.Group()
+
+
+class Particle(pg.sprite.Sprite):
+    fire = [pg.image.load(os.path.join(DATA_DIR, 'star.png'))]
+    for scale in (5, 10, 20):
+        fire.append(pg.transform.scale(fire[0], (scale, scale)))
+
+    def __init__(self, pos, dx, dy):
+        super().__init__(all_sprites)
+        self.image = random.choice(self.fire)
+        self.rect = self.image.get_rect()
+        self.velocity = [dx, dy]
+
+        self.rect.x, self.rect.y = pos
+        self.gravity = GRAVITY
+
+    def update(self):
+        self.velocity[1] += self.gravity
+        self.rect.x += self.velocity[0]
+        self.rect.y += self.velocity[1]
+
+        if not self.rect.colliderect(screen_rect):
+            self.kill()
+
+
+def create_particles(position):
+    particle_count = 30
+    numbers = range(-5, 6)
+    for _ in range(particle_count):
+        Particle(position, random.choice(numbers), random.choice(numbers))
+
+
+def main():
+    screen = pg.display.set_mode((500, 200))
+    font = pg.font.Font('C:\Windows\Fonts\ARIALN.TTF', 24)
+    clock = pg.time.Clock()
+    input_box = pg.Rect(200, 100, 140, 32)
+    color_inactive = pg.Color('black')
+    color_active = pg.Color('lightgreen')
+    color = color_inactive
+    active = False
+    text = ''
+    done = False
+    verdict = False
+    myindex = 0
+
+    def work_w_csv(task, myindex):
+        with open('question.csv', encoding="utf8", mode='r') as csvfile:
+            reader = csv.reader(csvfile, delimiter=';', quotechar='"')
+            for index, row in enumerate(reader):
+                if index == myindex:
+                    if task == 'question':
+                        return row[0]
+                    elif task == 'correct_answer':
+                        return row[1]
+
+    def check_answer(text):
+        if text == work_w_csv('correct_answer', myindex):
+            screen.blit(font.render('correct', True, pg.Color('black')), (300, 150))
+            pg.time.wait(1000)
+            for _ in range(5):
+                create_particles((random.randint(0, 500), random.randint(0, 200)))
+
+            return 'correct!'
+        return 'not correct'
+
+    while not done:
+        for event in pg.event.get():
+            if event.type == pg.QUIT:
+                done = True
+            if event.type == pg.MOUSEBUTTONDOWN:
+                if input_box.collidepoint(event.pos):
+                    active = not active
+                else:
+                    active = False
+                color = color_active if active else color_inactive
+            if event.type == pg.KEYDOWN:
+                if active:
+                    if event.key == pg.K_RETURN:
+                        verdict = True
+                        verdict_text = check_answer(text)
+                        print(text)
+                        text = ''
+                        myindex += 1
+                    elif event.key == pg.K_BACKSPACE:
+                        text = text[:-1]
+                    else:
+                        text += event.unicode
+        screen.fill((255, 255, 255))
+
+
+        all_sprites.update()
+        all_sprites.draw(screen)
+
+        text1 = work_w_csv('question', myindex)
+        screen.blit(font.render(text1, True, pg.Color('black')), (50, 50))
+        if verdict:
+            screen.blit(font.render(verdict_text, True, pg.Color('black')), (300, 150))
+            verdict = False
+        txt_surface = font.render(text, True, color)
+        width = max(200, txt_surface.get_width() + 10)
+        input_box.w = width
+
+        screen.blit(txt_surface, (input_box.x + 5, input_box.y + 5))
+        pg.draw.rect(screen, color, input_box, 1)
+        pg.display.flip()
+        clock.tick(30)
+
+
+if __name__ == '__main__':
+    pg.init()
+    main()
+    pg.quit()
