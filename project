@@ -1,0 +1,429 @@
+import pygame as pg
+import csv
+import random
+import os
+
+ready = False
+
+while not ready:
+    col = input('Введите цвет для окрашивания клеток поля:')
+
+    try:
+        colorforcells = pg.Color(col)
+    except ValueError:
+        print('')
+        print('Неправильное название цвета')
+        print('Название нужно указать на английском языке (blue, green, purple)')
+    else:
+        ready = True
+
+def shuffle_questions():
+    file = open("question.csv", encoding='utf8', mode="r")
+    li = file.readlines()
+    file.close()
+    random.shuffle(li)
+    fid = open("shuffled_questions.csv", encoding='utf8', mode="w")
+    fid.writelines(li)
+    fid.close()
+
+shuffle_questions()
+
+DATA_DIR = 'data'
+CSV_FILE = 'shuffled_questions.csv'
+
+all_sprites = pg.sprite.Group()
+N = 10
+
+clock = pg.time.Clock()
+screen_rect = (0, 0, 500, 500)
+
+
+class Particle(pg.sprite.Sprite):
+    fire = [pg.image.load(os.path.join(DATA_DIR, 'star.png'))]
+    for scale in (5, 10, 20):
+        fire.append(pg.transform.scale(fire[0], (scale, scale)))
+
+    def __init__(self, pos, dx, dy):
+        super().__init__(all_sprites)
+        self.image = random.choice(self.fire)
+        self.rect = self.image.get_rect()
+
+        self.velocity = [dx, dy]
+        self.rect.x, self.rect.y = pos
+        self.gravity = random.choice([-0.1, 0.1])
+
+    def update(self):
+        self.velocity[1] += self.gravity
+        self.rect.x += self.velocity[0]
+        self.rect.y += self.velocity[1]
+
+        if not self.rect.colliderect(screen_rect):
+            self.kill()
+
+
+class Board:
+    def __init__(self, width, height):
+        self.width = width
+        self.height = height
+        self.boardlist = [[0] * width for _ in range(height)]
+        self.left = 10
+        self.top = 10
+        self.cell_size = 30
+
+    def set_view(self, left, top, cell_size):
+        self.left = left
+        self.top = top
+        self.cell_size = cell_size
+
+    def render(self, screen):
+        for i in range(self.height):
+            for j in range(self.width):
+                pg.draw.rect(screen, self.set_color(i, j), (self.cell_size * j + self.left,
+                                                 self.cell_size * i + self.top,
+                                                 self.cell_size,
+                                                 self.cell_size))
+                pg.draw.rect(screen, (0, 0, 0), (self.cell_size * j + self.left,
+                                                           self.cell_size * i + self.top,
+                                                           self.cell_size,
+                                                           self.cell_size), 1)
+
+    def get_cell(self, mouse_pos):
+        if mouse_pos[0] > self.left and mouse_pos[1] > self.top:
+            x = ((mouse_pos[0] - self.left) // self.cell_size)
+            y = ((mouse_pos[1] - self.top) // self.cell_size)
+
+            if x <= self.width and y <= self.height:
+                return x, y
+
+    def set_color(self, i, j):
+        if self.boardlist[i][j] == 0:
+            return pg.Color('white')
+        else:
+            return self.boardlist[i][j]
+
+    def get_width_n_height(self):
+        return self.width, self.height
+
+
+class TaskBoard(Board):
+    def __init__(self, width, height, boardlist):
+        super().__init__(width, height)
+        self.boardlist = boardlist
+
+
+class MovingCreature():
+    def __init__(self, screen, rect, image, imagerect):
+        self.running = False
+        self.screen = screen
+        self.x, self.y = 50, 100
+        self.rect = rect
+        self.image = image
+        self.imagerect = imagerect
+
+    def are_coordinates_correct(self, coords, task):
+        x, y = coords
+        if task == 'left':
+            if x != self.rect.left:
+                return True
+        elif task == 'right':
+            if (x + self.imagerect.w) != self.rect.right:
+                return True
+        elif task == 'top':
+            if y != self.rect.top:
+                return True
+        elif task == 'bottom':
+            if (y + self.imagerect.w) != self.rect.bottom:
+                return True
+        return False
+
+    def _redraw_screen(self):
+        self._draw_creature((self.x, self.y))
+        #pg.display.flip()
+
+    def _draw_creature(self, position):
+        self.screen.blit(self.image, position)
+
+    def get_coords(self):
+        return self.x, self.y
+
+    def change_coords(self, xy, n):
+        if xy == 'x':
+            self.x += n
+        if xy == 'y':
+            self.y += n
+
+
+class Game:
+    def __init__(self):
+        pg.init()
+        self.screen = pg.display.set_mode((500, 500))
+        self.done = False
+
+        self.start = True
+        self.question = False
+        self.counts = 0
+        self.task = False
+
+        self.startrect = pg.Rect(50, 50, 200, 32)
+        self.questionrect = pg.Rect(50, 70, 400, 200)
+        self.input_box = pg.Rect(100, 200, 140, 32)
+        self.task_for_game = pg.Rect(10, 15, 215, 28)
+
+        self.font = pg.font.SysFont('timesnewroman', 22)
+        pg.display.set_caption('Интеллектуальная игра')
+
+        self.active = False
+        self.text = ''
+
+        self.color_inactive = pg.Color('black')
+        self.color_active = pg.Color('lightgreen')
+        self.color = self.color_inactive
+
+        self.myindex = 0
+
+        self.ballonimage = pg.image.load(os.path.join(DATA_DIR, 'ballon.png'))
+        self.ballonimagerect = self.ballonimage.get_rect()
+
+        self.board_width, self.board_height = 7, 7
+        self.boardleft, self.boardtop, self.cellsize = 50, 100, 50
+        self.board_creature_rect = pg.Rect(self.boardleft, self.boardtop,
+                                           self.cellsize * self.board_width, self.cellsize * self.board_height)
+
+        self.ballon = MovingCreature(self.screen, self.board_creature_rect, self.ballonimage, self.ballonimagerect)
+        self.close_questionrect = pg.Rect(300, 360, 100, 32)
+        self.verdict_rect = pg.Rect(300, 320, 100, 28)
+
+        self.readyanswer = False
+
+        self.board = Board(self.board_width, self.board_height)
+        self.board.set_view(self.boardleft, self.boardtop, self.cellsize)
+
+        self.random_boardlist = [[0] * self.board_width for _ in range(self.board_height)]
+        for _ in range(N):
+            self.random_boardlist[random.randint(0, self.board_height - 1)][random.randint(0, self.board_width - 1)] = \
+                colorforcells
+
+        self.win_or_fail = None
+
+    def make_question(self):
+        self.question = True
+        self.start = False
+        self.task = False
+
+    def create_particles(self, position):
+        particle_count = 30
+        numbers = range(-5, 6)
+        for _ in range(particle_count):
+            Particle(position, random.choice(numbers), random.choice(numbers))
+
+    def work_w_csv(self, task):
+        with open(CSV_FILE, encoding="utf8", mode='r') as csvfile:
+            reader = csv.reader(csvfile, delimiter=';', quotechar='"')
+            for index, row in enumerate(reader):
+                if index == self.myindex:
+                    if task == 'question' and row[0]:
+                        return row[0]
+                    elif task == 'correct_answer' and row[1]:
+                        return row[1]
+                    elif task == 'lenght':
+                        return len(list(reader))
+            csvfile.close()
+
+    def main(self):
+        while not self.done:
+            self.screen.fill((255, 255, 255))
+            if self.start:
+                for event in pg.event.get():
+                    if event.type == pg.QUIT:
+                        self.done = True
+                    if event.type == pg.MOUSEBUTTONDOWN:
+                        if self.startrect.collidepoint(event.pos):
+                            self.make_question()
+                        elif self.task_for_game.collidepoint(event.pos):
+                            self.show_the_task()
+
+                    if event.type == pg.KEYDOWN:
+                        if event.key == pg.K_LEFT and self.ballon.are_coordinates_correct(self.ballon.get_coords(), 'left'):
+                            self.ballon.change_coords('x', -50)
+                        if event.key == pg.K_RIGHT and self.ballon.are_coordinates_correct(self.ballon.get_coords(), 'right'):
+                            self.ballon.change_coords('x', 50)
+                        if event.key == pg.K_UP and self.ballon.are_coordinates_correct(self.ballon.get_coords(), 'top'):
+                            self.ballon.change_coords('y', -50)
+                        if event.key == pg.K_DOWN and self.ballon.are_coordinates_correct(self.ballon.get_coords(), 'bottom'):
+                            self.ballon.change_coords('y', 50)
+
+                self.board.render(self.screen)
+
+                self.ballon._redraw_screen()
+                txt_surface = self.font.render('Задать вопрос', True, self.color)
+                self.screen.blit(txt_surface, (self.startrect.x + 30, self.startrect.y + 5))
+                pg.draw.rect(self.screen, pg.Color('red'), self.startrect, 2)
+
+                txt_surface = pg.font.SysFont('timesnewroman', 22).render('Посмотреть задание', True, pg.Color('black'))
+                self.screen.blit(txt_surface, (self.task_for_game.x + 5, self.task_for_game.y + 3))
+                pg.draw.rect(self.screen, pg.Color('blue'), self.task_for_game, 2)
+
+            elif self.question:
+                for event in pg.event.get():
+                    if event.type == pg.QUIT:
+                        self.done = True
+                    if event.type == pg.MOUSEBUTTONDOWN:
+                        if self.readyanswer:
+                            if self.close_questionrect.collidepoint(event.pos):
+                                self.start, self.question, self.readyanswer = True, False, False
+                                self.myindex += 1
+                        if self.input_box.collidepoint(event.pos):
+                            self.change_active()
+                        else:
+                            self.active = False
+
+                        self.color = self.color_active if self.active else self.color_inactive
+
+                    if event.type == pg.KEYDOWN:
+                        if self.active:
+                            if event.key == pg.K_RETURN:
+                                if self.text == self.work_w_csv('correct_answer'):
+                                    x, y = self.ballon.get_coords()
+                                    xx, yy = self.board.get_cell(
+                                        (x + int(self.cellsize / 2), y + int(self.cellsize / 2)))
+
+                                    if self.random_boardlist[yy][xx] == colorforcells:
+                                        for _ in range(5):
+                                            self.create_particles((random.randint(0, 500), random.randint(0, 500)))
+                                        self.verdict = True
+                                        self.verdicttext = 'Правильный ответ'
+                                        self.counts += 200
+                                        self.board.boardlist[yy][xx] = colorforcells
+
+                                    else:
+                                        self.counts -= 100
+                                        self.verdict = False
+                                        self.verdicttext = 'Неправильная клетка'
+
+                                else:
+                                    self.counts -= 200
+                                    self.verdict = False
+                                    self.verdicttext = 'Неправильный ответ'
+                                self.readyanswer = True
+                                self.text = ''
+                            elif event.key == pg.K_BACKSPACE:
+                                self.text = self.text[:-1]
+                            else:
+                                self.text += event.unicode
+
+                all_sprites.update()
+                all_sprites.draw(self.screen)
+
+                if self.readyanswer:
+                    self.close_the_question()
+                    self.dalee_rect()
+                pg.draw.rect(self.screen, pg.Color('lightgreen'), self.questionrect, 3)
+                font = pg.font.SysFont('timesnewroman', 24)
+
+                pg.draw.rect(self.screen, self.color, self.input_box, 2)
+                txt_surface = font.render(self.text, True, self.color)
+                self.screen.blit(pg.font.SysFont('timesnewroman', 18).
+                                 render('*для активации окна ответа нужно на него нажать', True,
+                                        pg.Color('black')), (55, 240))
+                width = max(200, txt_surface.get_width() + 10)
+                self.input_box.w = width
+                self.screen.blit(txt_surface, (self.input_box.x + 5, self.input_box.y + 5))
+                self.screen.blit(pg.font.SysFont('timesnewroman', 20).render(self.work_w_csv('question'), True,
+                                                                             pg.Color('black')), (60, 120))
+                self.screen.blit(pg.font.SysFont('timesnewroman', 36).render('!ВОПРОС!', True,
+                                                                             pg.Color('black')), (170,30))
+
+            elif self.task:
+                for event in pg.event.get():
+                    if event.type == pg.QUIT:
+                        self.done = True
+                    if event.type == pg.MOUSEBUTTONDOWN:
+                        if self.close_questionrect.collidepoint(event.pos):
+                            self.task = False
+                            self.start = True
+
+                w, h = self.board.get_width_n_height()
+
+                self.task_board = TaskBoard(w, h, self.random_boardlist)
+                self.task_board.set_view(200, 50, 40)
+                self.task_board.render(self.screen)
+
+                self.dalee_rect()
+
+            elif self.finish:
+                for event in pg.event.get():
+                    if event.type == pg.QUIT:
+                        self.done = True
+                    if event.type == pg.MOUSEBUTTONDOWN:
+                        self.create_particles(event.pos)
+
+                if self.win_or_fail == 'winner':
+                    self.screen.blit(pg.font.SysFont('timesnewroman', 120).render('Победа :)',
+                                                                                  True, pg.Color('black')),
+                                     (100, 250))
+                    self.screen.blit(pg.font.SysFont('timesnewroman', 120).render('Победа :)',
+                                                                                  True, pg.Color('lightgreen')),
+                                     (105, 245))
+                    self.screen.blit(pg.font.SysFont('timesnewroman', 120).render('Победа :)',
+                                                                                  True, colorforcells),
+                                     (110, 240))
+                else:
+                    self.screen.blit(pg.font.SysFont('timesnewroman', 60).render('Проигрыш :(',
+                                                                                 True, pg.Color('black')), (100, 250))
+
+                all_sprites.update()
+                all_sprites.draw(self.screen)
+
+            txt_surface1 = pg.font.SysFont('timesnewroman', 22).render(f'Количество очков: {self.counts}',
+                                                                       True, self.counts_color())
+            self.screen.blit(txt_surface1, (200, 450))
+            if self.random_boardlist == self.board.boardlist:
+                self.question = False
+                self.start = False
+                self.finish = True
+                self.win_or_fail = 'winner'
+            elif self.myindex == self.work_w_csv('lenght') or self.counts <= -1000:
+                self.question = False
+                self.start = False
+                self.finish = True
+                self.win_or_fail == 'notwinner'
+
+            pg.display.flip()
+            clock.tick(50)
+
+    def change_active(self, n=False):
+        if not n:
+            self.active = not self.active
+        else:
+            self.active = False
+
+
+
+    def show_the_task(self):
+        self.task = True
+        self.question = False
+        self.start = False
+
+    def close_the_question(self):
+        color = pg.Color('green') if self.verdict else pg.Color('red')
+        if not self.verdict:
+            self.change_active(True)
+
+        self.screen.blit(pg.font.SysFont('timesnewroman', 24).render(self.verdicttext, True, color), (220, 320))
+
+    def dalee_rect(self):
+        pg.draw.rect(self.screen, pg.Color('lightgreen'), self.close_questionrect, 2)
+        self.screen.blit(pg.font.SysFont('timesnewroman', 24).render('>Далее', True, pg.Color('black')),
+                         (self.close_questionrect.x + 10, self.close_questionrect.y + 5))
+
+    def counts_color(self):
+        if self.counts > 0:
+            return pg.Color('lightgreen')
+        elif self.counts == 0:
+            return pg.Color('black')
+        return pg.Color('red')
+
+
+mygame = Game()
+mygame.main()
+
